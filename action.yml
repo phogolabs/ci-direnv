@@ -1,13 +1,21 @@
-name: 'Wait'
-description: 'Wait a designated number of milliseconds'
+name: 'ci-dotenv'
+description: 'Export environment variables from .env file'
+
 inputs:
-  milliseconds:  # id of input
-    description: 'number of milliseconds to wait'
+   path:
+    description: 'Path to the .env file (including file name)'
+    default: '.env'
     required: true
-    default: '1000'
+
+   mask-variables:
+    description: 'Consider the variables as secrets'
+    required: false
+    default: 'false'
+
 outputs:
-  time: # output will be available to future steps
-    description: 'The current time after waiting'
+  variables:
+    description: 'Exported environment variables'
+
 runs:
   using: 'node16'
   main: 'dist/index.js'
