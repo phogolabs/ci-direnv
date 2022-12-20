@@ -1762,6 +1762,212 @@ exports.checkBypass = checkBypass;
 
 /***/ }),
 
+/***/ 967:
+/***/ ((module) => {
+
+"use strict";
+
+
+// like String.prototype.search but returns the last index
+function _searchLast (str, rgx) {
+  const matches = Array.from(str.matchAll(rgx))
+  return matches.length > 0 ? matches.slice(-1)[0].index : -1
+}
+
+function _interpolate (envValue, environment, config) {
+  // find the last unescaped dollar sign in the
+  // value so that we can evaluate it
+  const lastUnescapedDollarSignIndex = _searchLast(envValue, /(?!(?<=\\))\$/g)
+
+  // If we couldn't match any unescaped dollar sign
+  // let's return the string as is
+  if (lastUnescapedDollarSignIndex === -1) return envValue
+
+  // This is the right-most group of variables in the string
+  const rightMostGroup = envValue.slice(lastUnescapedDollarSignIndex)
+
+  /**
+   * This finds the inner most variable/group divided
+   * by variable name and default value (if present)
+   * (
+   *   (?!(?<=\\))\$        // only match dollar signs that are not escaped
+   *   {?                   // optional opening curly brace
+   *     ([\w]+)            // match the variable name
+   *     (?::-([^}\\]*))?   // match an optional default value
+   *   }?                   // optional closing curly brace
+   * )
+   */
+  const matchGroup = /((?!(?<=\\))\${?([\w]+)(?::-([^}\\]*))?}?)/
+  const match = rightMostGroup.match(matchGroup)
+
+  if (match != null) {
+    const [, group, variableName, defaultValue] = match
+
+    return _interpolate(
+      envValue.replace(
+        group,
+        environment[variableName] ||
+          defaultValue ||
+          config.parsed[variableName] ||
+          ''
+      ),
+      environment,
+      config
+    )
+  }
+
+  return envValue
+}
+
+function _resolveEscapeSequences (value) {
+  return value.replace(/\\\$/g, '$')
+}
+
+function expand (config) {
+  // if ignoring process.env, use a blank object
+  const environment = config.ignoreProcessEnv ? {} : process.env
+
+  for (const configKey in config.parsed) {
+    const value = Object.prototype.hasOwnProperty.call(environment, configKey)
+      ? environment[configKey]
+      : config.parsed[configKey]
+
+    config.parsed[configKey] = _resolveEscapeSequences(
+      _interpolate(value, environment, config)
+    )
+  }
+
+  for (const processKey in config.parsed) {
+    environment[processKey] = config.parsed[processKey]
+  }
+
+  return config
+}
+
+module.exports.expand = expand
+
+
+/***/ }),
+
+/***/ 437:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(747)
+const path = __nccwpck_require__(622)
+const os = __nccwpck_require__(87)
+const packageJson = __nccwpck_require__(980)
+
+const version = packageJson.version
+
+const LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/mg
+
+// Parser src into an Object
+function parse (src) {
+  const obj = {}
+
+  // Convert buffer to string
+  let lines = src.toString()
+
+  // Convert line breaks to same format
+  lines = lines.replace(/\r\n?/mg, '\n')
+
+  let match
+  while ((match = LINE.exec(lines)) != null) {
+    const key = match[1]
+
+    // Default undefined or null to empty string
+    let value = (match[2] || '')
+
+    // Remove whitespace
+    value = value.trim()
+
+    // Check if double quoted
+    const maybeQuote = value[0]
+
+    // Remove surrounding quotes
+    value = value.replace(/^(['"`])([\s\S]*)\1$/mg, '$2')
+
+    // Expand newlines if double quoted
+    if (maybeQuote === '"') {
+      value = value.replace(/\\n/g, '\n')
+      value = value.replace(/\\r/g, '\r')
+    }
+
+    // Add to object
+    obj[key] = value
+  }
+
+  return obj
+}
+
+function _log (message) {
+  console.log(`[dotenv@${version}][DEBUG] ${message}`)
+}
+
+function _resolveHome (envPath) {
+  return envPath[0] === '~' ? path.join(os.homedir(), envPath.slice(1)) : envPath
+}
+
+// Populates process.env from .env file
+function config (options) {
+  let dotenvPath = path.resolve(process.cwd(), '.env')
+  let encoding = 'utf8'
+  const debug = Boolean(options && options.debug)
+  const override = Boolean(options && options.override)
+
+  if (options) {
+    if (options.path != null) {
+      dotenvPath = _resolveHome(options.path)
+    }
+    if (options.encoding != null) {
+      encoding = options.encoding
+    }
+  }
+
+  try {
+    // Specifying an encoding returns a string instead of a buffer
+    const parsed = DotenvModule.parse(fs.readFileSync(dotenvPath, { encoding }))
+
+    Object.keys(parsed).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(process.env, key)) {
+        process.env[key] = parsed[key]
+      } else {
+        if (override === true) {
+          process.env[key] = parsed[key]
+        }
+
+        if (debug) {
+          if (override === true) {
+            _log(`"${key}" is already defined in \`process.env\` and WAS overwritten`)
+          } else {
+            _log(`"${key}" is already defined in \`process.env\` and was NOT overwritten`)
+          }
+        }
+      }
+    })
+
+    return { parsed }
+  } catch (e) {
+    if (debug) {
+      _log(`Failed to load ${dotenvPath} ${e.message}`)
+    }
+
+    return { error: e }
+  }
+}
+
+const DotenvModule = {
+  config,
+  parse
+}
+
+module.exports.config = DotenvModule.config
+module.exports.parse = DotenvModule.parse
+module.exports = DotenvModule
+
+
+/***/ }),
+
 /***/ 294:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -2688,20 +2894,11 @@ exports.default = _default;
 
 /***/ }),
 
-/***/ 258:
+/***/ 980:
 /***/ ((module) => {
 
-let wait = function (milliseconds) {
-  return new Promise((resolve) => {
-    if (typeof milliseconds !== 'number') {
-      throw new Error('milliseconds not a number');
-    }
-    setTimeout(() => resolve("done!"), milliseconds)
-  });
-};
-
-module.exports = wait;
-
+"use strict";
+module.exports = JSON.parse('{"name":"dotenv","version":"16.0.3","description":"Loads environment variables from .env file","main":"lib/main.js","types":"lib/main.d.ts","exports":{".":{"require":"./lib/main.js","types":"./lib/main.d.ts","default":"./lib/main.js"},"./config":"./config.js","./config.js":"./config.js","./lib/env-options":"./lib/env-options.js","./lib/env-options.js":"./lib/env-options.js","./lib/cli-options":"./lib/cli-options.js","./lib/cli-options.js":"./lib/cli-options.js","./package.json":"./package.json"},"scripts":{"dts-check":"tsc --project tests/types/tsconfig.json","lint":"standard","lint-readme":"standard-markdown","pretest":"npm run lint && npm run dts-check","test":"tap tests/*.js --100 -Rspec","prerelease":"npm test","release":"standard-version"},"repository":{"type":"git","url":"git://github.com/motdotla/dotenv.git"},"keywords":["dotenv","env",".env","environment","variables","config","settings"],"readmeFilename":"README.md","license":"BSD-2-Clause","devDependencies":{"@types/node":"^17.0.9","decache":"^4.6.1","dtslint":"^3.7.0","sinon":"^12.0.1","standard":"^16.0.4","standard-markdown":"^7.1.0","standard-version":"^9.3.2","tap":"^15.1.6","tar":"^6.1.11","typescript":"^4.5.4"},"engines":{"node":">=12"}}');
 
 /***/ }),
 
@@ -2835,20 +3032,41 @@ var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be isolated against other modules in the chunk.
 (() => {
 const core = __nccwpck_require__(186);
-const wait = __nccwpck_require__(258);
-
 
 // most @actions toolkit packages have async methods
 async function run() {
   try {
-    const ms = core.getInput('milliseconds');
-    core.info(`Waiting ${ms} milliseconds ...`);
+    const path = core.getInput('path');
+    const mask = core.getInput('mask');
+    const expr = core.getInput('export');
 
-    core.debug((new Date()).toTimeString()); // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
-    await wait(parseInt(ms));
-    core.info((new Date()).toTimeString());
+    const dotenv = __nccwpck_require__(437).config({ path });
+    const dotexp = __nccwpck_require__(967).expand(dotenv);
+    const variables = {}
 
-    core.setOutput('time', new Date().toTimeString());
+    core.info(`Exporting environment variables from ${path}`)
+    core.setOutput('variables', variables);
+
+    for (const name in dotexp.parsed) {
+      const key = name.toLocaleLowerCase();
+      const value = dotexp.parsed[name];
+      // output the value
+      variables[key] = value
+      // export the value
+      if (expr) {
+        core.info(`Exporting environment variables ${name}`);
+        core.exportVariable(name, value);
+      }
+    }
+
+    for (const name in dotexp.parsed) {
+      const value = dotexp.parsed[name];
+      // mask the value
+      if (mask) {
+        core.info(`Masking environment variables ${name}`);
+        core.setSecret(value);
+      }
+    }
   } catch (error) {
     core.setFailed(error.message);
   }
